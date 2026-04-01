@@ -2,6 +2,7 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install python3-libnvinfer*
 sudo apt install python3.10-venv -y
+sudo apt install git-lfs -y
 sudo apt autoremove -y
 
 python3 -m venv .venv --system-site-packages
@@ -9,6 +10,7 @@ source .venv/bin/activate
 
 python3 -m pip install -U pip setuptools wheel packaging
 
+git lfs install
 
 TORCH_OK=$(python3 -c "import pkg_resources,sys; \
     sys.exit(0 if any(d.project_name=='torch' and d.version=='2.3.0' for d in pkg_resources.working_set) else 1)" \
