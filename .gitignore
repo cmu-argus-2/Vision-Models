@@ -6,3 +6,6 @@
 !*.sh
 !*.csv
 !.gitattributes
+!*.pt
+!*.pth
+!*.trt
