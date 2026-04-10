@@ -225,7 +225,7 @@ def pt_to_trt(model_path, device_onnx=None, fp16_onnx=False, fp16_trt=True, keep
                 print(f"WARNING: CUDA is available but not functional ({e})")
                 convert_to_trt = False
         
-        if convert_to_trt:
+        if not convert_to_trt:
             print("  ⚠ WARNING: Cannot build TensorRT engine on CPU")
             print("  ⚠ TensorRT requires GPU support for engine building")
             print("  ✓ ONNX model has been exported successfully")
@@ -364,14 +364,14 @@ if __name__ == "__main__":
     
     # If your .pth contains the complete model, set this to None:
     # model_architecture = None
-    ld_folder = "models/V1/trained-ld/"
+    ld_folder = "models/trained-ld/V2"
 
     list_folder = os.listdir(ld_folder)
     print(list_folder)
 
     for folder in list_folder:
         #  not folder.startswith("17T")
-        if not os.path.isdir(os.path.join(ld_folder, folder)) or not folder.startswith("17T"):
+        if not os.path.isdir(os.path.join(ld_folder, folder)): #  or not folder.startswith("17T"):
             continue
         path = os.path.join(ld_folder, folder, f"{folder}_weights")
         
@@ -384,9 +384,9 @@ if __name__ == "__main__":
             fp16_trt=True,
             device_onnx='cpu',         # cuda, cpu
             keep_onnx=True,
-            convert_to_trt=False,
+            convert_to_trt=True,
             onnx_imgsz=4608,
-            onnx_dyn_input=False,
+            onnx_dyn_input=True,
             trt_imgsz=(2592,4608), # 4608, # 
             nms=False
         )
