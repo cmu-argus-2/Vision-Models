@@ -343,12 +343,12 @@ def _write_model_section(f, label, exists, sorted_class_ids, sorted_confidences,
 
 
 def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_string, pngstring, use_jpg, results_folder):
-    pt_model_path    = f"models/{model_version}/trained-ld/{region_id}/{region_id}_weights.pt"
-    trt_engine_path  = f"models/{model_version}/trained-ld/{region_id}/{region_id}_weights_{fpstring}_sz_{tgt_imgsz[1]}{nms_string}.trt"
-    onnx_engine_path = f"models/{model_version}/trained-ld/{region_id}/{region_id}_weights_{fpstring}_sz_{tgt_imgsz[1]}.onnx"
-    bbox_path = f"models/{model_version}/trained-ld/{region_id}/bounding_boxes.csv"
-    image_path = f"models/{model_version}/sample_images/l8_{region_id}_{image_id}.{pngstring}"
-    label_path = f"models/{model_version}/sample_images/l8_{region_id}_{image_id}.txt"
+    pt_model_path    = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights.pt"
+    trt_engine_path  = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_{fpstring}_sz_{tgt_imgsz[0]}x{tgt_imgsz[1]}{nms_string}.trt"
+    onnx_engine_path = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_fp32_sz_{tgt_imgsz[1]}.onnx"
+    bbox_path = f"models/trained-ld/{model_version}/{region_id}/bounding_boxes.csv"
+    image_path = f"models/sample_images/{region_id}/l8_{region_id}_{image_id}.{pngstring}"
+    label_path = f"models/sample_images/{region_id}/l8_{region_id}_{image_id}.txt"
 
     if not os.path.exists(image_path):
         if use_jpg:
@@ -582,11 +582,11 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
 
 
 if __name__ == "__main__":
-    model_version = "V1"
+    model_version = "V2"
     tgt_imgsz     = (2592, 4608)  # (H, W)
     fp16          = True
     trt_with_nms  = False
-    use_jpg       = False
+    use_jpg       = True
 
     fpstring   = "fp16" if fp16 else "fp32"
     nms_string = "_nms" if trt_with_nms else ""
@@ -594,8 +594,22 @@ if __name__ == "__main__":
 
     # ── Add / remove entries here to control which images are processed ──
     samples = [
+        ("10S", "00001"),
+        ("10T", "00001"),
+        ("11R", "00001"),
+        ("12R", "00001"),
+        ("16T", "00001"),
         ("17T", "00330"),
         ("17R", "00168"),
+        ("18S", "00001"),
+        ("32S", "00001"),
+        ("32T", "00001"),
+        ("33S", "00001"),
+        ("33T", "00001"),
+        ("52S", "00001"),
+        ("53S", "00001"),
+        ("54S", "00001"),
+        ("54T", "00001"),
     ]
 
     script_dir     = os.path.dirname(os.path.abspath(__file__))
