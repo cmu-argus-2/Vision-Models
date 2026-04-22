@@ -77,9 +77,8 @@ git switch --track origin/dvc
 Clone the repository, switch to the DVC branch, install DVC with SSH support, and then pull the large files:
 
 ```bash
-git clone https://github.com/cmu-argus-2/Vision-Models.git Vision-Models-DVC
+GIT_LFS_SKIP_SMUDGE=1 git clone -b dvc --single-branch https://github.com/cmu-argus-2/Vision-Models.git Vision-Models-DVC
 cd Vision-Models-DVC
-git switch dvc
 pipx install "dvc[ssh]"
 
 # or
