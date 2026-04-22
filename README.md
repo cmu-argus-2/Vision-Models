@@ -81,6 +81,11 @@ git clone https://github.com/cmu-argus-2/Vision-Models.git Vision-Models-DVC
 cd Vision-Models-DVC
 git switch dvc
 pipx install "dvc[ssh]"
+
+# or
+# pipx install dvc
+# pipx inject dvc dvc-ssh
+
 dvc pull
 ```
 
