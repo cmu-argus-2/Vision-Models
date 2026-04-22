@@ -1,0 +1,6 @@
+outs:
+- md5: 4bf83dc6e678136fe710b25ca87c2658.dir
+  size: 87498639
+  nfiles: 6
+  hash: md5
+  path: trained-rc

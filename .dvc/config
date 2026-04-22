@@ -1,0 +1,4 @@
+[core]
+    remote = host-storage
+['remote "host-storage"']
+    url = ssh://argus@172.24.58.65/home/argus/ARGUS_models/dvc-models-storage

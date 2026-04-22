@@ -6,6 +6,13 @@
 !*.sh
 !*.csv
 !.gitattributes
+!.dvc
+!.dvc/
+!.dvc/**
+!*.dvc
 !*.pt
 !*.pth
 !*.trt
+/trained-ld
+/trained-rc
+/sample_images
