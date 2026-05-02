@@ -116,16 +116,37 @@ Make changes inside the DVC-tracked directories:
 - `trained-rc/`
 - `sample_images/`
 
-Then update the DVC metadata, upload the data objects, and push the Git commit:
+Before updating DVC metadata, make sure the DVC-tracked directories are fully materialized locally:
 
 ```bash
 cd ~/ARGUS_models/Vision-Models-DVC
 git switch dvc
+git pull
+dvc pull trained-ld.dvc trained-rc.dvc sample_images.dvc
+```
+
+This is IMPORTANT because `dvc add <directory>` records the directory exactly as it exists on disk at that moment. If files are missing locally, the new `.dvc` manifest will also be missing those files, and future `dvc pull` commands will not fetch them.
+
+For model updates, run quick sanity checks before re-adding a directory:
+
+```bash
+find trained-ld -type f | wc -l
+find trained-ld/V1 trained-ld/V2 -name '*.trt' | wc -l
+find trained-rc -type f | wc -l
+find sample_images -type f | wc -l
+```
+
+Then update only the DVC metadata for directories you intentionally changed, upload the data objects, and push the Git commit:
+
+```bash
+# Example: only run the commands for directories you changed.
+# If you changed only trained-ld, do not re-add trained-rc or sample_images.
 
 dvc add trained-ld
-dvc add trained-rc
-dvc add sample_images
+# dvc add trained-rc
+# dvc add sample_images
 
+git diff -- trained-ld.dvc trained-rc.dvc sample_images.dvc
 dvc push
 
 git add .dvc/config .dvc/.gitignore .gitignore trained-ld.dvc trained-rc.dvc sample_images.dvc README.md
@@ -136,9 +157,13 @@ git push origin dvc
 ### Important notes
 
 - Keep `trained-ld/`, `trained-rc/`, and `sample_images/` present locally.
+- DO NOT run `dvc add` on an incomplete directory. DVC directory outputs are replacement snapshots (i.e. whatever you have locally is what is pushed, included whatever files you currently *don't* have), not incremental updates.
+- Always inspect `git diff -- *.dvc` before committing. If `nfiles` or `size` drops and you did not intentionally remove files, stop and run `dvc pull` before re-adding.
+- Only run `dvc add` for directories that actually changed.
 - These directories should **not** be tracked directly by Git after migration to DVC.
 - Git should track the `.dvc` files and DVC config files instead.
 - Run `dvc push` before `git push` so the remote storage already contains the data referenced by the new commit.
+- If accidental manifest shrink keeps happening, split large outputs by version, such as `trained-ld/V1`, `trained-ld/V2`, and `trained-ld/V3`, so updating one version cannot rewrite the manifest for the others.
 
 ## Local directory layout on `argus-workstation`
 
@@ -201,7 +226,12 @@ dvc pull
 ```bash
 cd ~/ARGUS_models/Vision-Models-DVC
 git switch dvc
-dvc add trained-ld trained-rc sample_images
+git pull
+dvc pull trained-ld.dvc trained-rc.dvc sample_images.dvc
+
+# Only add directories that were intentionally changed.
+dvc add trained-ld
+git diff -- trained-ld.dvc
 dvc push
 git add .dvc/config .dvc/.gitignore .gitignore trained-ld.dvc trained-rc.dvc sample_images.dvc README.md
 git commit -m "Update DVC-tracked artifacts"
