@@ -1,6 +1,6 @@
 outs:
-- md5: 66d26522784674a64fcf67b273db7aec.dir
-  size: 38153290
-  nfiles: 42
+- md5: 94eb8fa5adc27254e1bdda01fb16150e.dir
+  size: 1258265088
+  nfiles: 182
   hash: md5
   path: sample_images
