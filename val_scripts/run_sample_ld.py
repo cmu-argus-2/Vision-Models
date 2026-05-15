@@ -347,8 +347,8 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
     trt_engine_path  = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_{fpstring}_sz_{tgt_imgsz[0]}x{tgt_imgsz[1]}{nms_string}.trt"
     onnx_engine_path = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_fp32_sz_{tgt_imgsz[1]}.onnx"
     bbox_path = f"models/trained-ld/{model_version}/{region_id}/bounding_boxes.csv"
-    image_path = f"models/sample_images/{region_id}/l8_{region_id}_{image_id}.{pngstring}"
-    label_path = f"models/sample_images/{region_id}/l8_{region_id}_{image_id}.txt"
+    image_path = f"models/sample_images/{model_version}/{region_id}/l8_{region_id}_{image_id}.{pngstring}"
+    label_path = f"models/sample_images/{model_version}/{region_id}/l8_{region_id}_{image_id}.txt"
 
     if not os.path.exists(image_path):
         if use_jpg:
@@ -582,7 +582,7 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
 
 
 if __name__ == "__main__":
-    model_version = "V2"
+    model_version = "V3"
     tgt_imgsz     = (2592, 4608)  # (H, W)
     fp16          = True
     trt_with_nms  = False
@@ -596,18 +596,18 @@ if __name__ == "__main__":
     samples = [
         ("10S", "00001"),
         ("10T", "00001"),
-        ("11R", "00001"),
+        ("11R", "00002"),
         ("12R", "00001"),
-        ("16T", "00001"),
-        ("17T", "00330"),
-        ("17R", "00168"),
-        ("18S", "00001"),
-        ("32S", "00001"),
+        ("16T", "00002"),
+        ("17T", "00002"),
+        ("17R", "00002"),        
+        ("18S", "00002"),
+        ("32S", "00002"),
         ("32T", "00001"),
-        ("33S", "00001"),
-        ("33T", "00001"),
-        ("52S", "00001"),
-        ("53S", "00001"),
+        ("33S", "00003"),
+        ("33T", "00002"),
+        ("52S", "00003"),
+        ("53S", "00002"),
         ("54S", "00001"),
         ("54T", "00001"),
     ]
