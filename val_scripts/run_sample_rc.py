@@ -14,23 +14,24 @@ from PIL import Image
 
 
 REGION_IDS = [
-    "10S",
-    "10T",
-    "11R",
-    "12R",
-    "16T",
-    "17R",
-    "17T",
-    "18S",
-    "32S",
-    "32T",
-    "33S",
-    "33T",
-    "52S",
-    "53S",
-    "54S",
-    "54T",
+    "10S", # 'California'
+    "10T", # 'Washington / Oregon'
+    "11R", # 'Baja California, Mexico'
+    "12R", # 'Sonora, Mexico'
+    "16T", # 'Minnesota / Wisconsin / Iowa / Illinois'
+    "17R", # 'Florida'
+    "17T", # 'Toronto, Canada / Michigan / OH / PA'
+    "18S", # 'New Jersey / Washington DC'
+    "32S", # 'Tunisia (North Africa near Tyrrhenian Sea)'
+    "32T", # 'Switzerland / Italy / Tyrrhenian Sea'
+    "33S", # 'Sicilia, Italy'
+    "33T", # 'Italy / Adriatic Sea'
+    "52S", # 'Korea / Kumamoto, Japan'
+    "53S", # 'Hiroshima to Nagoya, Japan'
+    "54S", # 'Tokyo to Hachinohe, Japan'
+    "54T", # 'Sapporo, Japan'
 ]
+
 
 NUM_CLASSES = len(REGION_IDS)
 THRESHOLD = 0.5
