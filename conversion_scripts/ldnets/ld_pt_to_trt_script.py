@@ -364,14 +364,15 @@ if __name__ == "__main__":
     
     # If your .pth contains the complete model, set this to None:
     # model_architecture = None
-    ld_folder = "models/trained-ld/V2"
+    ld_folder = "models/trained-ld/V3"
 
     list_folder = os.listdir(ld_folder)
     print(list_folder)
 
+    target_folders = ["10S", "10T", "11R", "12R", "16T", "17R", "17T", "18S", "32S", "32T", "33S", "33T", "52S", "53S", "54S", "54T"]
+
     for folder in list_folder:
-        #  not folder.startswith("17T")
-        if not os.path.isdir(os.path.join(ld_folder, folder)): #  or not folder.startswith("17T"):
+        if not os.path.isdir(os.path.join(ld_folder, folder)) or folder not in target_folders:
             continue
         path = os.path.join(ld_folder, folder, f"{folder}_weights")
         
@@ -382,7 +383,7 @@ if __name__ == "__main__":
             model_path=path,
             fp16_onnx=False,             # Enable FP16
             fp16_trt=True,
-            device_onnx='cpu',         # cuda, cpu
+            device_onnx='cuda',         # cuda, cpu
             keep_onnx=True,
             convert_to_trt=True,
             onnx_imgsz=4608,

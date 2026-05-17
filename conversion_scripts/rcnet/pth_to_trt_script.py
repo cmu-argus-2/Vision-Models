@@ -3,6 +3,7 @@ PyTorch to TensorRT Converter - State Dict Compatible
 Handles .pth files that contain only state_dict (OrderedDict)
 """
 
+import argparse
 import torch
 import torch.nn as nn
 import torchvision
@@ -10,6 +11,12 @@ import tensorrt as trt
 import os
 import sys
 from collections import OrderedDict
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+FALLBACK_V4_WEIGHTS_PATH = "/home/argus/ARGUS/Vision-Models/trained-rc/V4/rc_model_weights.pth"
+
 
 def check_pth_content(pth_path):
     """Check what's inside the .pth file"""
@@ -121,14 +128,13 @@ def pth_to_trt(pth_path, trt_path, input_shape, model_architecture, device=None,
                 export_params=True,
                 opset_version=17,
                 do_constant_folding=True,
-                input_names=['l_x_'],        # Must match C++ runtimes.cpp
-                output_names=['sigmoid_1'],  # Must match C++ runtimes.cpp
+                input_names=['input'],   # Must match C++ runtimes.cpp
+                output_names=['output'], # Must match C++ runtimes.cpp
                 dynamic_axes={
-                    'l_x_': {0: 'batch'},
-                    'sigmoid_1': {0: 'batch'}
+                    'input': {0: 'batch'},
+                    'output': {0: 'batch'}
                 },
                 verbose=False,
-                dynamo=False  # Use legacy exporter
             )
         print("  ✓ ONNX export successful")
         
@@ -164,7 +170,7 @@ def pth_to_trt(pth_path, trt_path, input_shape, model_architecture, device=None,
         min_shape = (1, input_shape[1], input_shape[2], input_shape[3])
         opt_shape = (1, input_shape[1], input_shape[2], input_shape[3])
         max_shape = (8, input_shape[1], input_shape[2], input_shape[3])
-        profile.set_shape("l_x_", min_shape, opt_shape, max_shape)  # Must match input name
+        profile.set_shape("input", min_shape, opt_shape, max_shape)  # Must match input name
         config.add_optimization_profile(profile)
         print("  ✓ Optimization profile added")
         
@@ -219,20 +225,20 @@ def pth_to_trt(pth_path, trt_path, input_shape, model_architecture, device=None,
 class ClassifierEfficient(nn.Module):
     """
     EfficientNet-B0 based classifier for region classification.
-    40 output classes for different geographic regions.
     """
-    def __init__(self, num_classes=40):
+    def __init__(self, num_classes=16):
         super(ClassifierEfficient, self).__init__()
 
         self.num_classes = num_classes
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        weights = torchvision.models.EfficientNet_B0_Weights.DEFAULT
+        weights = None
         self.efficientnet = torchvision.models.efficientnet_b0(weights=weights)
-        for param in self.efficientnet.features[:3].parameters():
-            param.requires_grad = False
         num_features = self.efficientnet.classifier[1].in_features
-        self.efficientnet.classifier[1] = nn.Linear(num_features, num_classes)
+        self.efficientnet.classifier = nn.Sequential(
+            nn.Dropout(p=0.3),
+            nn.Linear(num_features, num_classes),
+        )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -241,44 +247,118 @@ class ClassifierEfficient(nn.Module):
         return x
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert RC PyTorch .pth weights to a TensorRT .trt engine."
+    )
+    parser.add_argument(
+        "--rc-base-folder",
+        "--base-rc-folder",
+        default=os.path.join(MODELS_DIR, "trained-rc"),
+        help="Base folder containing versioned RC model folders.",
+    )
+    parser.add_argument(
+        "--version",
+        default="V4",
+        help="RC model version folder under the base RC folder.",
+    )
+    parser.add_argument(
+        "--weights-name",
+        default="rc_model_weights",
+        help="Weights filename stem used for both .pth input and .trt output.",
+    )
+    parser.add_argument(
+        "--pth-path",
+        default=None,
+        help="Optional full input .pth path. Overrides --rc-base-folder/--version.",
+    )
+    parser.add_argument(
+        "--trt-path",
+        default=None,
+        help="Optional full output .trt path. Overrides --rc-base-folder/--version.",
+    )
+    parser.add_argument(
+        "--input-shape",
+        nargs=4,
+        type=int,
+        default=(1, 3, 224, 224),
+        metavar=("BATCH", "CHANNELS", "HEIGHT", "WIDTH"),
+        help="Input tensor shape for ONNX export and TensorRT profiling.",
+    )
+    parser.add_argument(
+        "--num-classes",
+        type=int,
+        default=16,
+        help="Number of RC output classes for the EfficientNet classifier.",
+    )
+    parser.add_argument(
+        "--device",
+        choices=("cuda", "cpu"),
+        default=None,
+        help="Device to use for conversion. Defaults to auto-detect.",
+    )
+    parser.add_argument(
+        "--no-fp16",
+        dest="fp16",
+        action="store_false",
+        default=True,
+        help="Disable FP16 TensorRT conversion.",
+    )
+    return parser.parse_args()
+
+
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
 if __name__ == "__main__":
-    
-    # ========== CONFIGURATION - MODIFY THESE VALUES ==========
-    
-    PTH_MODEL_PATH = "rc_model_weights.pth"  # Your .pth file path
-    TRT_MODEL_PATH = "rc_model_weights.trt"  # Output .trt file path
-    INPUT_SHAPE = (1, 3, 224, 224)  # (batch_size, channels, height, width)
-    
+    args = parse_args()
+
+    rc_folder = os.path.join(args.rc_base_folder, args.version)
+    pth_model_path = args.pth_path or os.path.join(
+        rc_folder, f"{args.weights_name}.pth"
+    )
+    if (
+        args.pth_path is None
+        and args.version == "V4"
+        and not os.path.exists(pth_model_path)
+        and os.path.exists(FALLBACK_V4_WEIGHTS_PATH)
+    ):
+        pth_model_path = FALLBACK_V4_WEIGHTS_PATH
+    trt_model_path = args.trt_path or os.path.join(
+        rc_folder, f"{args.weights_name}.trt"
+    )
+    input_shape = tuple(args.input_shape)
+
     # Create model architecture instance
-    # If your .pth contains only state_dict, you MUST provide the architecture
-    model_architecture = ClassifierEfficient()
-    
-    # If your .pth contains the complete model, set this to None:
-    # model_architecture = None
-    
-    # =========================================================
+    # If your .pth contains only state_dict, you MUST provide the architecture.
+    model_architecture = ClassifierEfficient(num_classes=args.num_classes)
     
     print("PyTorch to TensorRT Converter")
     print("="*60 + "\n")
     
     # Check if model file exists
-    if not os.path.exists(PTH_MODEL_PATH):
-        print(f"✗ Model file not found: {PTH_MODEL_PATH}")
-        print("\nPlease update PTH_MODEL_PATH in the script.")
+    print(f"RC base folder: {args.rc_base_folder}")
+    print(f"RC version: {args.version}")
+    print(f"Input PTH: {pth_model_path}")
+    print(f"Output TRT: {trt_model_path}")
+
+    if not os.path.exists(pth_model_path):
+        print(f"✗ Model file not found: {pth_model_path}")
+        print("\nPlease check --rc-base-folder/--version or pass --pth-path.")
         sys.exit(1)
+
+    trt_dir = os.path.dirname(os.path.abspath(trt_model_path))
+    os.makedirs(trt_dir, exist_ok=True)
     
     # Perform conversion
     success = pth_to_trt(
-        pth_path=PTH_MODEL_PATH,
-        trt_path=TRT_MODEL_PATH,
-        input_shape=INPUT_SHAPE,
+        pth_path=pth_model_path,
+        trt_path=trt_model_path,
+        input_shape=input_shape,
         model_architecture=model_architecture,  # Your model architecture
-        device=None,  # Auto-detect
-        fp16=True     # Enable FP16
+        device=args.device,
+        fp16=args.fp16,
     )
     
     if not success:

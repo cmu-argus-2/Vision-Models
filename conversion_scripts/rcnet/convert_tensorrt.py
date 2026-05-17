@@ -1,7 +1,17 @@
+import argparse
 import sys
+from pathlib import Path
+
 import tensorrt as trt
 
-def build_engine(model_path):
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+MODELS_DIR = SCRIPT_DIR.parents[1]
+DEFAULT_ONNX_PATH = MODELS_DIR / "trained-rc" / "V4" / "rc_model_weights.onnx"
+DEFAULT_TRT_PATH = MODELS_DIR / "trained-rc" / "V4" / "rc_model_weights.trt"
+
+
+def build_engine(model_path, output_path):
 
     TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) 
     builder = trt.Builder(TRT_LOGGER)
@@ -86,7 +96,8 @@ def build_engine(model_path):
         print("Engine created successfully")
 
         try:
-            with open("model.trt", 'wb') as f:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'wb') as f:
                 f.write(bytearray(engine))
         except Exception as e:
             print(f"Error writing the engine to file: {e}")
@@ -94,5 +105,9 @@ def build_engine(model_path):
     return engine
 
 if __name__ == '__main__':
-    # build_engine( model_path="effnet.onnx")
-    build_engine( model_path="/home/argus/Documents/batch_opt/FSW-Payload-2/effnet_0997acc_fixed.onnx")
+    parser = argparse.ArgumentParser(description="Convert RC V4 ONNX to TensorRT.")
+    parser.add_argument("--onnx-path", default=str(DEFAULT_ONNX_PATH))
+    parser.add_argument("--trt-path", default=str(DEFAULT_TRT_PATH))
+    args = parser.parse_args()
+
+    build_engine(model_path=args.onnx_path, output_path=Path(args.trt_path))

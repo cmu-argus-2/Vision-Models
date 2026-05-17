@@ -30,14 +30,15 @@ if __name__ == "__main__":
     list_folder = os.listdir(ld_folder)
     print(list_folder)
 
+    target_folders = ["10S", "10T", "11R", "12R", "16T", "17R", "17T", "18S", "32S", "32T", "33S", "33T", "52S", "53S", "54S", "54T"]
+
     for folder in list_folder:
-        if not os.path.isdir(os.path.join(ld_folder, folder)) or not folder.startswith("10T"):
+        if not os.path.isdir(os.path.join(ld_folder, folder)) or folder not in target_folders:
             continue
         path = os.path.join(ld_folder, folder, f"{folder}_weights.pt")
         # config["data"] = os.path.join(ld_folder, folder, "dataset.yaml")
         print(f"Converting model at: {path}")
         convert_model(path, **config)
-        break
         
 """
 format	str	'torchscript'	Target format for the exported model, such as 'onnx', 'torchscript', 'engine' (TensorRT), or others. Each format enables compatibility with different deployment environments.

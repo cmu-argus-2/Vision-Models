@@ -1,3 +1,4 @@
+import argparse
 import torch
 import numpy as np
 from PIL import Image
@@ -12,8 +13,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Sequence
 from torchvision.ops import nms
 import time
-import pycuda.driver as cuda
-import pycuda.autoinit
+try:
+    import pycuda.driver as cuda
+    import pycuda.autoinit
+    CUDA_IMPORT_ERROR = None
+except Exception as exc:
+    cuda = None
+    CUDA_IMPORT_ERROR = exc
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import onnxruntime as ort
@@ -94,6 +100,8 @@ class ONNXModel:
 
 class TrtModel:
     def __init__(self,engine_path,max_batch_size=1,dtype=np.float32):
+        if cuda is None:
+            raise RuntimeError(f"PyCUDA is not available: {CUDA_IMPORT_ERROR}")
         
         self.engine_path = engine_path
         self.dtype = dtype
@@ -168,7 +176,7 @@ class TrtModel:
         return [out.host.reshape(batch_size,-1) for out in self.outputs]
 
 
-def preprocess_image(img_array, target_size=4608): # input image will be at most 4608x2592
+def preprocess_image(img_array, target_size=4608, return_meta=False): # input image will be at most 4608x2592
     height, width = img_array.shape[:2]
     
     if isinstance(target_size,int):
@@ -190,9 +198,9 @@ def preprocess_image(img_array, target_size=4608): # input image will be at most
     img_array = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
     # Letterbox to 4608x4608
-    pad_top = np.max((target_height - new_height) // 2,0)
+    pad_top = max((target_height - new_height) // 2,0)
     pad_bottom = target_height - new_height - pad_top
-    pad_left = np.max((target_width - new_width) // 2,0)
+    pad_left = max((target_width - new_width) // 2,0)
     pad_right = target_width - new_width - pad_left
     img_letterboxed = np.pad(img_array, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), mode='constant', constant_values=0)
 
@@ -202,6 +210,8 @@ def preprocess_image(img_array, target_size=4608): # input image will be at most
     # NCHW
     img_letterboxed = np.transpose(img_letterboxed, (0, 3, 1, 2)) / 255.0
     
+    if return_meta:
+        return img_letterboxed, scale, pad_left, pad_top
     return img_letterboxed
 
 def xywh_to_xyxy(boxes):
@@ -219,6 +229,59 @@ def xyxy_to_xywh(boxes):
     w = x2 - x1
     h = y2 - y1
     return torch.stack((x, y, w, h), dim=-1)
+
+def parse_rotations(rotation_text):
+    rotations = []
+    for value in rotation_text.split(","):
+        value = value.strip()
+        if not value:
+            continue
+        rotations.append(int(value) % 360)
+    return rotations or [0]
+
+def rotate_labels(labels, rotation):
+    rotation = rotation % 360
+    rotated = labels.copy()
+    x = labels[:, 1].copy()
+    y = labels[:, 2].copy()
+    w = labels[:, 3].copy()
+    h = labels[:, 4].copy()
+
+    if rotation == 90:
+        rotated[:, 1] = y
+        rotated[:, 2] = 1.0 - x
+        rotated[:, 3] = h
+        rotated[:, 4] = w
+    elif rotation == 180:
+        rotated[:, 1] = 1.0 - x
+        rotated[:, 2] = 1.0 - y
+    elif rotation == 270:
+        rotated[:, 1] = 1.0 - y
+        rotated[:, 2] = x
+        rotated[:, 3] = h
+        rotated[:, 4] = w
+    elif rotation != 0:
+        raise ValueError("LD rotation augmentation only supports 0, 90, 180, and 270 degrees")
+
+    return rotated
+
+def rotate_image_and_labels(img_array, labels, rotation):
+    rotation = rotation % 360
+    if rotation == 0:
+        return img_array, labels
+
+    return np.ascontiguousarray(np.rot90(img_array, k=rotation // 90)), rotate_labels(labels, rotation)
+
+def undo_letterbox_xywh(boxes, scale, pad_left, pad_top):
+    if len(boxes) == 0:
+        return boxes
+
+    boxes = boxes.clone()
+    boxes[:, 0] = (boxes[:, 0] - pad_left) / scale
+    boxes[:, 1] = (boxes[:, 1] - pad_top) / scale
+    boxes[:, 2] = boxes[:, 2] / scale
+    boxes[:, 3] = boxes[:, 3] / scale
+    return boxes
 
 def yolo_postprocess(pred: torch.Tensor, conf_thres=0.5, iou_thres=0.45):
     """
@@ -342,13 +405,13 @@ def _write_model_section(f, label, exists, sorted_class_ids, sorted_confidences,
     f.write("\n")
 
 
-def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_string, pngstring, use_jpg, results_folder):
+def run_single(region_id, image_id, model_version, sample_version, tgt_imgsz, fpstring, nms_string, pngstring, use_jpg, results_folder, rotation=0):
     pt_model_path    = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights.pt"
     trt_engine_path  = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_{fpstring}_sz_{tgt_imgsz[0]}x{tgt_imgsz[1]}{nms_string}.trt"
     onnx_engine_path = f"models/trained-ld/{model_version}/{region_id}/{region_id}_weights_fp32_sz_{tgt_imgsz[1]}.onnx"
     bbox_path = f"models/trained-ld/{model_version}/{region_id}/bounding_boxes.csv"
-    image_path = f"models/sample_images/{model_version}/{region_id}/l8_{region_id}_{image_id}.{pngstring}"
-    label_path = f"models/sample_images/{model_version}/{region_id}/l8_{region_id}_{image_id}.txt"
+    image_path = f"models/sample_images/{sample_version}/{region_id}/l8_{region_id}_{image_id}.{pngstring}"
+    label_path = f"models/sample_images/{sample_version}/{region_id}/l8_{region_id}_{image_id}.txt"
 
     if not os.path.exists(image_path):
         if use_jpg:
@@ -385,38 +448,45 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
         left = (width - IMAGE_WIDTH) // 2
         img_array = img_array[:, left:left + IMAGE_WIDTH]
 
+    img_array, labels = rotate_image_and_labels(img_array, labels, rotation)
+    img = Image.fromarray(img_array)
     height, width = img_array.shape[:2] # should be 4608x2592 after cropping
     batch_size = 1
     
-    trt_engine_exists  = os.path.exists(trt_engine_path)
+    trt_engine_exists  = os.path.exists(trt_engine_path) and cuda is not None
     pt_engine_exists   = os.path.exists(pt_model_path)
-    onnx_engine_exists = os.path.exists(onnx_engine_path)
+    onnx_engine_exists = os.path.exists(onnx_engine_path) and rotation == 0
     
     # Original Pytorch model inference for comparison
     # torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if pt_engine_exists:
         pt_model  = PTModel(pt_model_path, "cuda" if torch.cuda.is_available() else "cpu")
         start_time = time.time()
-        result = pt_model(img, 0.5, (2592,4608), True)
+        result = pt_model(img, 0.5, (height, width), True)
         pt_inference_time = time.time() - start_time
         
         start_time = time.time()
-        pt_xywh, pt_confidences, pt_class_ids = pt_model.post_process(result, (IMAGE_WIDTH, IMAGE_HEIGHT))
+        pt_xywh, pt_confidences, pt_class_ids = pt_model.post_process(result, (width, height))
         pt_postprocess_time = time.time() - start_time
 
         # Release PyTorch's CUDA memory cache before TensorRT allocates its workspace.
         # PyTorch's caching allocator holds onto GPU memory even after tensors are freed,
         # which fragments the heap and forces TRT into slow allocation paths.
         del pt_model
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
     else:
         print(f"{pt_model_path} not found")
 
     if trt_engine_exists:
         trt_model = TrtModel(trt_engine_path)
         
-        img_letterboxed = preprocess_image(img_array, target_size=tgt_imgsz)
+        img_letterboxed, trt_scale, trt_pad_left, trt_pad_top = preprocess_image(
+            img_array,
+            target_size=tgt_imgsz,
+            return_meta=True,
+        )
         
         start_time = time.time()
         result = trt_model(img_letterboxed, batch_size)
@@ -426,11 +496,15 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
         result_array = result[0].squeeze()
         print(f"TensorRT output shape: {result_array.shape}")
         trt_boxes, trt_confidences, trt_class_ids = yolo_postprocess(torch.from_numpy(result_array), conf_thres=0.5, iou_thres=0.45)
+        trt_boxes = undo_letterbox_xywh(trt_boxes, trt_scale, trt_pad_left, trt_pad_top)
         # TODO: Make this general
         # trt_boxes[:, 1] -= 1008
         trt_postprocess_time = time.time() - start_time
     else:
-        print(f"{trt_engine_path} not found")
+        if cuda is None and os.path.exists(trt_engine_path):
+            print(f"Skipping TensorRT because PyCUDA is not available: {CUDA_IMPORT_ERROR}")
+        else:
+            print(f"{trt_engine_path} not found")
 
     # ONNX runtime
     if onnx_engine_exists:
@@ -446,7 +520,10 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
         onnx_boxes[:, 1] -= 1008
         onnx_postprocess_time = time.time() - start_time
     else:
-        print(f"{onnx_engine_path} not found")
+        if rotation != 0 and os.path.exists(onnx_engine_path):
+            print("Skipping ONNX for rotated LD augmentation")
+        else:
+            print(f"{onnx_engine_path} not found")
 
     bboxes = np.loadtxt(bbox_path, delimiter=",", skiprows=1)
     
@@ -494,10 +571,12 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
     all_class_ids.sort()
     max_len = len(all_class_ids)
 
-    output_txt_file = os.path.join(results_folder, f"detection_comparison_{region_id}_{image_id}.txt")
+    rotation_suffix = f"_rot{rotation}" if rotation else ""
+    output_txt_file = os.path.join(results_folder, f"detection_comparison_{region_id}_{image_id}{rotation_suffix}.txt")
     with open(output_txt_file, "w") as f:
         f.write(f"# LD Comparison: Region {region_id} — Image {image_id}\n\n")
-        f.write(f"**Config:** {fpstring}, sz={tgt_imgsz}, {pngstring}\n\n")
+        f.write(f"**Config:** model={model_version}, samples={sample_version}, {fpstring}, sz={tgt_imgsz}, {pngstring}\n\n")
+        f.write(f"**Rotation:** {rotation}\n\n")
         f.write("---\n\n")
         f.write("## Performance\n\n")
         f.write(f"- Image loading time: {img_loading_time:.4f} s\n")
@@ -550,7 +629,7 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
             for i in range(pt_sorted_boxes.shape[0]):
                 rect = patches.Rectangle((pt_sorted_boxes[i, 0], pt_sorted_boxes[i, 1]), pt_sorted_boxes[i, 2], pt_sorted_boxes[i, 3], linewidth=1, edgecolor='b', facecolor='none')
                 ax.add_patch(rect)
-            fig.savefig(results_folder + f"comparison_plot_pt_{region_id}_{image_id}.png")
+            fig.savefig(results_folder + f"comparison_plot_pt_{region_id}_{image_id}{rotation_suffix}.png")
         if trt_engine_exists:
             fig2, ax2 = plt.subplots()
             ax2.imshow(img)
@@ -563,7 +642,7 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
             for i in range(len(trt_sorted_boxes)):
                 rect = patches.Rectangle((trt_sorted_boxes[i, 0], trt_sorted_boxes[i, 1]), trt_sorted_boxes[i, 2], trt_sorted_boxes[i, 3], linewidth=1, edgecolor='g', facecolor='none')
                 ax2.add_patch(rect)
-            fig2.savefig(results_folder + f"comparison_plot_trt_{region_id}_{image_id}.png")
+            fig2.savefig(results_folder + f"comparison_plot_trt_{region_id}_{image_id}{rotation_suffix}.png")
         if onnx_engine_exists:
             fig3, ax3 = plt.subplots()
             ax3.imshow(img)
@@ -576,13 +655,29 @@ def run_single(region_id, image_id, model_version, tgt_imgsz, fpstring, nms_stri
             for i in range(len(onnx_sorted_boxes)):
                 rect = patches.Rectangle((onnx_sorted_boxes[i, 0], onnx_sorted_boxes[i, 1]), onnx_sorted_boxes[i, 2], onnx_sorted_boxes[i, 3], linewidth=1, edgecolor='g', facecolor='none')
                 ax3.add_patch(rect)
-            fig3.savefig(results_folder + f"comparison_plot_onnx_{region_id}_{image_id}.png")
+            fig3.savefig(results_folder + f"comparison_plot_onnx_{region_id}_{image_id}{rotation_suffix}.png")
     except Exception as e:
         print(f"Error occurred while saving plots: {e}")
 
 
 if __name__ == "__main__":
-    model_version = "V3"
+    parser = argparse.ArgumentParser(description="Validate LD models on sample images.")
+    parser.add_argument("--model-version", default="V2")
+    parser.add_argument("--sample-version", default="V3")
+    parser.add_argument(
+        "--rotation-augment",
+        action="store_true",
+        help="Run each test image at 0, 90, 180, and 270 degrees.",
+    )
+    parser.add_argument(
+        "--rotations",
+        default=None,
+        help="Comma-separated rotations in degrees. Overrides --rotation-augment.",
+    )
+    args = parser.parse_args()
+
+    model_version = args.model_version
+    sample_version = args.sample_version
     tgt_imgsz     = (2592, 4608)  # (H, W)
     fp16          = True
     trt_with_nms  = False
@@ -591,6 +686,12 @@ if __name__ == "__main__":
     fpstring   = "fp16" if fp16 else "fp32"
     nms_string = "_nms" if trt_with_nms else ""
     pngstring  = "jpg"  if use_jpg else "png"
+    if args.rotations is not None:
+        rotations = parse_rotations(args.rotations)
+    elif args.rotation_augment:
+        rotations = [0, 90, 180, 270]
+    else:
+        rotations = [0]
 
     # ── Add / remove entries here to control which images are processed ──
     samples = [
@@ -613,12 +714,13 @@ if __name__ == "__main__":
     ]
 
     script_dir     = os.path.dirname(os.path.abspath(__file__))
-    results_folder = os.path.join(script_dir, f"../../results/ld_comp_{fpstring}_sz_{tgt_imgsz}_{pngstring}/")
+    results_folder = os.path.join(script_dir, f"../../results/{model_version}_ld_comp_{fpstring}_sz_{tgt_imgsz}_{pngstring}/")
     os.makedirs(results_folder, exist_ok=True)
 
     for region_id, image_id in samples:
-        print(f"\n{'='*60}")
-        print(f"Running  region={region_id}  image={image_id}")
-        print(f"{'='*60}")
-        run_single(region_id, image_id, model_version, tgt_imgsz,
-                   fpstring, nms_string, pngstring, use_jpg, results_folder)
+        for rotation in rotations:
+            print(f"\n{'='*60}")
+            print(f"Running  model={model_version}  samples={sample_version}  region={region_id}  image={image_id}  rotation={rotation}")
+            print(f"{'='*60}")
+            run_single(region_id, image_id, model_version, sample_version, tgt_imgsz,
+                       fpstring, nms_string, pngstring, use_jpg, results_folder, rotation)
